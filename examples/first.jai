@@ -99,6 +99,70 @@ main :: () {
         case .PANGO; assert("wooo type: string" == tprint("% type: %", var, type_of(var)));
         });
     }
+    {
+        // The names of the enum and union members can have arbitrary names. Also nested sum-types are supported.
+        Food :: struct {
+            idx:   enum  { NOTFRUIT;     FRUIT;               }
+            foods: union { not_fruit: u8; fruit: Fruit = ---; } @UnionTag:idx
+        }
+        food:= Food.{idx=.FRUIT, foods.fruit=.{tag=.PANGO, variants.pango="bird"}};
+
+        // Below we demonstrate that we can nest match calls. Note that `var` in the inner match will shadow th outer `var`, just like it/it_index would in nested for loops.
+        // To expose the outer var to the inner match we can use the var_name argument to rename it in either scope.
+        match(#code if food == {
+        case .NOTFRUIT; assert(false);
+        case .FRUIT;
+            match(#code if var == {
+            case .MANGO; assert(false);
+            case .PANGO; assert("bird type: string" == tprint("% type: %", var, type_of(var)));
+            });
+        });
+    }
+    {
+        using fruit.tag;
+        match(#code if fruit == {
+            case MANGO; assert("3 type: u8"      == tprint("% type: %", var, type_of(var)));
+            case PANGO; assert("yo type: string" == tprint("% type: %", var, type_of(var)));
+        });
+    }
+    {
+        // A bunch of invalid cases that cause compiler errors
+
+        // In contrast to normal if switch statements match does not support procedure calls to compute the enum variant.
+        // Uncomment to see the compilation error
+        // match(#code if fruit == {
+        //     case cast(type_of(fruit.tag), 0);
+        //     case .PANGO;
+        // });
+
+        // Match only takes if switch statements
+        // match(#code print("nope"));
+        // match(#code if fruit == fruit then print("nope"););
+
+        // Only case statements are allowed in the if switch statement
+        // match(#code if fruit == {
+        //     a:= 2;
+        // });
+
+        // Case value is not a variant of the tags enum
+        // match(#code if fruit == {
+        // case .NOPE;
+        // });
+
+        // Case value is not a variant of the tags enum
+        // match(#code if fruit == {
+        // case .NOPE;
+        // });
+
+        // The enum index of the enum value must match a union variant
+        // invalid: struct {
+        //     tag:      enum  { MANGO; PANGO; }
+        //     variants: union { mango: u8;    } @UnionTag:tag
+        // }
+        // match(#code if invalid == {
+        //     case .PANGO;
+        // });
+    }
 }
 
 global_count:= 0;

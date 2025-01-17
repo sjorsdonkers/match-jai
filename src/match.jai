@@ -32,8 +32,13 @@
 match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
     // Compute the original condition expression here once, to prevent recomputation and to enable us to get the type as well as the values out
     `_condition:= #insert,scope(call) -> Code {
-        root := compiler_get_nodes(code);  assert(root.kind == .IF);
-        return compiler_get_code(cast(*Code_If, root).condition);
+        root := compiler_get_nodes(code);
+
+        if root.kind != .IF { compiler_report("The code passed to match must be an if switch statement.", make_location(root)); }
+        if_root :*Code_If= xx root;
+        if (if_root.if_flags & .IS_SWITCH_STATEMENT) == 0 { compiler_report("The if statement in match needs to be a switch: if condition == {.", make_location(if_root)); }
+
+        return compiler_get_code(if_root.condition);
     };
 
     // Note: currently it is not possible for the union not to have a name as a name is required to put a tag on it.
@@ -43,7 +48,6 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
 
     #insert,scope(call) -> Code {
         if_root :*Code_If= xx compiler_get_nodes(code);
-        assert((if_root.if_flags & .IS_SWITCH_STATEMENT) > 0);
 
         // Change the condition to be the tag enum value of the original condition
         template :: #code _condition.tag_name;
@@ -56,7 +60,6 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
 
         // Insert `var:= *condition.union.variant;` at the start of each case block
         for if_root.then_block.statements {
-            assert(it.kind == .CASE);
             code_case :*Code_Case= xx it;
             if code_case.condition == null continue; // Default case
 
@@ -66,13 +69,14 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
             // Recursively get till we are at the last @speed we we don't need to collect or recurse into all, we just need the last one
             nodes: [..] *Code_Node;
             get_recursive_nodes_breadth_first(code_case.condition, *nodes);
-            assert(nodes.count > 0 && peek(nodes).kind == .IDENT);
+            assert(nodes.count > 0, "match(..) implementation issue, the default case should not be processed");
+            if peek(nodes).kind != .IDENT { compiler_report("Case condition must be an explicit enum variant identifier.", make_location(code_case.condition)); }
             enum_variant :*Code_Ident= xx peek(nodes);
 
             // Use index to get name of union variant and assign the value to `var`
             found, index := array_find(enum_info.names, enum_variant.name);
-            assert(found, ".% is not a variant of enum %", enum_variant.name, enum_info.name);
-            assert(union_info.members.count > index);
+            if !found { compiler_report("The case value is not a variant of the tags enum", make_location(code_case.condition)); }
+            if index >= union_info.members.count { compiler_report("The tag's variant has no related index in the union", make_location(code_case.condition)); }
             unions_variant_name := union_info.members[index].name;
 
             make_var_declaration :: (union_name: string, variant_name: string, variable_name: string, by_pointer: bool) -> *Code_Declaration {
@@ -84,7 +88,7 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
                         then #code variable_name:= *_condition.variant_name
                         else #code variable_name:=  _condition.variant_name;
 
-                root, decl_nodes := compiler_get_nodes(template);  assert(root.kind == .DECLARATION);
+                root, decl_nodes:= compiler_get_nodes(template);
                 decl :*Code_Declaration= xx root;
 
                 // Rename variables in the declaration
