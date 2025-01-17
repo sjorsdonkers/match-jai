@@ -6,14 +6,8 @@
 // Example sum-type:
 //
 // Fruit :: struct {
-//     tag: enum u8 {
-//         MANGO;
-//         PANGO;
-//     }
-//     variants: union {
-//         mango: u8;
-//         pango: string = ---;
-//     } @UnionTag:tag
+//     tag:      enum  { MANGO;     PANGO;               }
+//     variants: union { mango: u8; pango: string = ---; } @UnionTag:tag
 // }
 //
 // Input code:
@@ -23,12 +17,13 @@
 // }
 
 // Expands to a switch statement on the tag of the sum-type and assigns the union variant to a var:
-// if fruit.tag == {
+// _condition:= fruit;
+// if _condition.tag == {
 // case .MANGO;
-//     var:= fruit.mango;
+//     var:= _condition.variants.mango;
 //     print("Mango %\n", var);
 // case .PANGO;
-//     var:= fruit.pango;
+//     var:= _condition.variants.pango;
 //     print("Pango %\n", var);
 // }
 //
