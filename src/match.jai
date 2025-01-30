@@ -1,13 +1,13 @@
 // Match expands a switch statement on a sum-type struct, such that the union variant is accessible in the case block.
-// A sum-type is defined as a struct that has a tag enum and a union with a @UnionTag note to indicate the tag member name.
+// A sum-type is defined as a struct that has a tag enum and a union.
 // The tag and union are required to have the same number of variants. Only 1 tagged union pair per struct is supported.
 // The union may not be hidden within a nested using-ed struct.
 //
 // Example sum-type:
 //
-// Fruit :: struct {
+// Fruit :: struct @SumType {
 //     tag:      enum  { MANGO;     PANGO;               }
-//     variants: union { mango: u8; pango: string = ---; } @UnionTag:tag
+//     variants: union { mango: u8; pango: string = ---; }
 // }
 //
 // Input code:
@@ -41,12 +41,8 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
         return compiler_get_code(if_root.condition);
     };
 
-    // Note: currently it is not possible for the union not to have a name as a name is required to put a tag on it.
-    union_name, tag_name :: #run get_union_info(type_of(_condition));
-    #insert #run tprint("enum_info  :: type_info(type_of(_condition.%));", tag_name);
-    #insert #run tprint("union_info :: type_info(type_of(_condition.%));", union_name);
-
     #insert,scope(call) -> Code {
+        valid, tag_member, union_member, tag_info, union_info := is_valid_sumtype(type_of(_condition));  assert(valid);
         if_root :*Code_If= xx compiler_get_nodes(code);
 
         // Change the condition to be the tag enum value of the original condition
@@ -54,7 +50,7 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
         new_condition, tag_nodes:= compiler_get_nodes(template);
         for tag_nodes if it.kind == .IDENT {
             ident :*Code_Ident= xx it;
-            if ident.name == "tag_name"  ident.name = tag_name;
+            if ident.name == "tag_name"  ident.name = tag_member.name;
         }
         if_root.condition = new_condition;
 
@@ -74,7 +70,7 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
             enum_variant :*Code_Ident= xx peek(nodes);
 
             // Use index to get name of union variant and assign the value to `var`
-            found, index := array_find(enum_info.names, enum_variant.name);
+            found, index := array_find(tag_info.names, enum_variant.name);
             if !found { compiler_report("The case value is not a variant of the tags enum", make_location(code_case.condition)); }
             if index >= union_info.members.count { compiler_report("The tag's variant has no related index in the union", make_location(code_case.condition)); }
             unions_variant_name := union_info.members[index].name;
@@ -104,45 +100,12 @@ match :: (code:Code, var_name:="var", call:=#caller_code) #expand {
             // Prepend the new statement to the existing statements of the current case block
             new_statements : [..] *Code_Node;
             condition_by_pointer := type_info(type_of(_condition)).type == .POINTER;
-            array_add(*new_statements, make_var_declaration(union_name, unions_variant_name, var_name, condition_by_pointer));
+            array_add(*new_statements, make_var_declaration(union_member.name, unions_variant_name, var_name, condition_by_pointer));
             array_add(*new_statements, ..code_case.then_block.statements);
             code_case.then_block.statements = new_statements;
         }
         return compiler_get_code(if_root);
     }
-}
-
-#scope_file
-
-base_struct_info :: (info: *Type_Info) -> ok:=false, struct_info:*Type_Info_Struct=null {
-    if info.type == {
-    case .POINTER;
-        pointer_info :*Type_Info_Pointer= xx info;
-        ok, struct_info:= base_struct_info(pointer_info.pointer_to);
-        return ok, struct_info;
-    case .VARIANT;
-        variant_info :*Type_Info_Variant= xx info;
-        ok, struct_info:= base_struct_info(variant_info.variant_of);
-        return ok, struct_info;
-    case .STRUCT; return true, xx info;
-    }
-    return;
-}
-
-// The union must be directly within the sum-types struct. We do not recursively search for the union in nested using-ed structs.
-get_union_info :: ($type: Type) -> union_name:="", tag_name:="" {
-    ok, info:= base_struct_info(type_info(type)); assert(ok);
-    for member: info.members {
-        // Find union member with @UnionTag note
-        if member.type.type != .STRUCT continue;
-        member_info :*Type_Info_Struct= xx member.type;
-        if !(member_info.textual_flags & .UNION) continue;
-        tag_name: string;
-        for note: member.notes if begins_with(note, "UnionTag:") { tag_name = slice(note, 9, note.count-9); break; }
-        if tag_name then return member.name, tag_name;
-    }
-    assert(false, "No union member found in % with an @UnionTag:TAG_NAME note", info.name);
-    return;
 }
 
 #import "Basic";
